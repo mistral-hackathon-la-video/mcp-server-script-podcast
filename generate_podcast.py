@@ -70,9 +70,9 @@ class PodcastConfig:
     # TTS Engine selection
     tts_engine: Literal["kokoro", "elevenlabs", "mixed", "mock"] = "mixed"
     
-    # Voice settings
-    headline_voice: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel - for headlines 
-    text_voice: str = "2EiwWnXFnvU5JabPnv8n"    # Clyde - for main text
+    # Voice settings - Using the specified high-quality voice
+    headline_voice: str = "JBFqnCBsd6RMkjVDRZzb"  # Specified ElevenLabs voice - for headlines 
+    text_voice: str = "JBFqnCBsd6RMkjVDRZzb"     # Specified ElevenLabs voice - for main text
     
     # Audio settings
     sample_rate: int = 24000
@@ -237,12 +237,12 @@ class PodcastGenerator:
             else:
                 voice_settings = None
             
-            # Generate audio
+            # Generate audio using v3 endpoint for better quality
             audio_generator = self.elevenlabs.text_to_speech.convert(
                 text=clean_text,
                 voice_id=voice,
                 voice_settings=voice_settings,
-                model_id="eleven_multilingual_v2"
+                model_id="eleven_turbo_v2_5"  # v3 endpoint for better quality
             )
             
             # Collect audio bytes

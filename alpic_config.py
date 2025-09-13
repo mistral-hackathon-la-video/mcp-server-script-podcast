@@ -41,9 +41,9 @@ class AlpicConfig:
     DEFAULT_SAMPLE_RATE = 24000
     DEFAULT_OUTPUT_FORMAT = "wav"
     
-    # ElevenLabs Voice Configuration
-    HEADLINE_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel
-    TEXT_VOICE_ID = "2EiwWnXFnvU5JabPnv8n"     # Clyde
+    # ElevenLabs Voice Configuration - Using specified high-quality voice
+    HEADLINE_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # Specified high-quality voice
+    TEXT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"     # Specified high-quality voice
     
     # File Management
     MAX_FILE_SIZE_MB = 100  # Maximum output file size

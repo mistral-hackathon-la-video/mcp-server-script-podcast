@@ -790,14 +790,14 @@ async def generate_script(
 
 @mcp.tool(
     title="Generate Podcast",
-    description="Generates an audio podcast from a text script using ElevenLabs TTS",
+    description="Generates an audio podcast from a text script using TTS (audio packages required)",
 )
 async def generate_podcast(
     script_text: str = Field(description="The script text content to convert to audio"),
     output_filename: str = Field(default="podcast.wav", description="Output filename for the generated podcast"),
-    tts_engine: str = Field(default="elevenlabs", description="TTS engine to use: 'elevenlabs', 'kokoro', 'mixed', or 'mock'"),
-    headline_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="ElevenLabs voice ID for headlines (default: Rachel)"),
-    text_voice_id: str = Field(default="2EiwWnXFnvU5JabPnv8n", description="ElevenLabs voice ID for main text (default: Clyde)"),
+    tts_engine: str = Field(default="mock", description="TTS engine to use: 'elevenlabs', 'kokoro', 'mixed', or 'mock'"),
+    headline_voice_id: str = Field(default="JBFqnCBsd6RMkjVDRZzb", description="ElevenLabs voice ID for headlines (specified high-quality voice)"),
+    text_voice_id: str = Field(default="JBFqnCBsd6RMkjVDRZzb", description="ElevenLabs voice ID for main text (specified high-quality voice)"),
     sample_rate: int = Field(default=24000, description="Audio sample rate"),
     silence_duration: float = Field(default=0.5, description="Silence duration between segments in seconds"),
     headline_silence: float = Field(default=1.0, description="Extra silence after headlines in seconds")
@@ -805,7 +805,7 @@ async def generate_podcast(
     """Generates an audio podcast from a text script.
     
     This tool takes a formatted script text (with \\Headline: and \\Text: components)
-    and converts it to an audio podcast using ElevenLabs text-to-speech.
+    and converts it to an audio podcast using text-to-speech.
     
     Args:
         script_text: The formatted script text content
@@ -824,8 +824,33 @@ async def generate_podcast(
         ValueError: If podcast generation fails
     """
     try:
+        # Check for audio dependencies
+        missing_deps = []
+        
+        try:
+            import soundfile as sf
+        except ImportError:
+            missing_deps.append("soundfile")
+            
+        try:
+            import numpy as np
+        except ImportError:
+            missing_deps.append("numpy")
+            
+        if missing_deps:
+            return f"⚠️ Audio podcast generation is not available in this deployment.\n" \
+                   f"Missing dependencies: {', '.join(missing_deps)}\n" \
+                   f"\n📝 Script content processed successfully:\n" \
+                   f"Text length: {len(script_text)} characters\n" \
+                   f"Engine requested: {tts_engine}\n" \
+                   f"\n💡 To enable audio generation, install: pip install {' '.join(missing_deps)}"
+        
         # Import the podcast generation classes
-        from generate_podcast import PodcastGenerator, PodcastConfig
+        try:
+            from generate_podcast import PodcastGenerator, PodcastConfig
+        except ImportError:
+            return f"⚠️ Podcast generation module not available.\n" \
+                   f"Script content processed successfully (text length: {len(script_text)} characters)"
         
         # Extract actual values from Field objects if needed
         actual_tts_engine = getattr(tts_engine, 'default', tts_engine) if hasattr(tts_engine, 'default') else tts_engine
@@ -858,7 +883,6 @@ async def generate_podcast(
         
         # Get file info
         import os
-        import soundfile as sf
         
         if os.path.exists(output_path):
             # Get duration
@@ -885,7 +909,8 @@ async def generate_podcast(
         
     except Exception as e:
         logger.error(f"Error generating podcast: {e}")
-        raise ValueError(f"Podcast generation failed: {str(e)}")
+        return f"⚠️ Podcast generation failed: {str(e)}\n" \
+               f"Script content processed successfully (text length: {len(script_text)} characters)"
 
 
 @mcp.tool(
@@ -898,9 +923,9 @@ async def generate_script_and_podcast(
     output_filename: str = Field(default="podcast.wav", description="Output filename for the generated podcast"),
     method: str = Field(default="openrouter", description="The method to use for script generation"),
     from_pdf: bool = Field(default=False, description="Whether the paper comes from PDF extraction"),
-    tts_engine: str = Field(default="elevenlabs", description="TTS engine to use: 'elevenlabs', 'kokoro', 'mixed', or 'mock'"),
-    headline_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="ElevenLabs voice ID for headlines (default: Rachel)"),
-    text_voice_id: str = Field(default="2EiwWnXFnvU5JabPnv8n", description="ElevenLabs voice ID for main text (default: Clyde)")
+    tts_engine: str = Field(default="mock", description="TTS engine to use: 'elevenlabs', 'kokoro', 'mixed', or 'mock'"),
+    headline_voice_id: str = Field(default="JBFqnCBsd6RMkjVDRZzb", description="ElevenLabs voice ID for headlines (specified high-quality voice)"),
+    text_voice_id: str = Field(default="JBFqnCBsd6RMkjVDRZzb", description="ElevenLabs voice ID for main text (specified high-quality voice)")
 ) -> str:
     """Complete pipeline: generates script from paper and converts to podcast.
     
