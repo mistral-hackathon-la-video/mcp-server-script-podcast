@@ -733,7 +733,7 @@ SCRIPGENETOR_MODEL = os.getenv("SCRIPGENETOR_MODEL")
 GEMINI_SCRIP_MODEL = os.getenv("GEMINI_SCRIP_MODEL")
 
 
-mcp = FastMCP("ArXiv Script Generator", port=3000, stateless_http=True, debug=True)
+mcp = FastMCP("Podcast Generator", port=3000, stateless_http=True, debug=True)
 
 
 @mcp.tool(
@@ -995,4 +995,5 @@ def greet_user(
 
 
 if __name__ == "__main__":
+    # Configure for Alpic deployment
     mcp.run(transport="streamable-http")

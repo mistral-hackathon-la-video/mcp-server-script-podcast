@@ -2,7 +2,7 @@
 
 ## Overview
 
-This MCP (Model Context Protocol) server provides podcast generation capabilities for Alpaca. It can:
+This MCP (Model Context Protocol) server provides podcast generation capabilities for Alpic. It can:
 
 1. Generate video scripts from research papers
 2. Convert text scripts to audio podcasts using TTS
@@ -80,11 +80,11 @@ OCR_PROVIDER=openrouter
 # ... (other existing variables)
 ```
 
-### 3. Deploy to Alpaca
+### 3. Deploy to Alpic
 
-1. **Upload Files**: Upload `main.py` and all supporting files to Alpaca
+1. **Upload Files**: Upload `main.py` and all supporting files to Alpic
 2. **Install Dependencies**: Run `uv sync` to install dependencies
-3. **Set Environment**: Configure environment variables in Alpaca
+3. **Set Environment**: Configure environment variables in Alpic
 4. **Start Server**: Deploy `main.py` as an MCP server
 
 ## 🧪 Testing

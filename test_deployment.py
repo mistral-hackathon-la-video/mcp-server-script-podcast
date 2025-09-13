@@ -167,7 +167,7 @@ async def main():
     
     print()
     if all_passed:
-        print("🎉 All tests passed! MCP server is ready for deployment on Alpaca!")
+        print("🎉 All tests passed! MCP server is ready for deployment on Alpic!")
         print()
         print("📝 Deployment Instructions:")
         print("  1. Ensure all dependencies are installed: uv sync")
