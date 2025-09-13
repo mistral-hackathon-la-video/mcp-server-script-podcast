@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Import our modules
 from generate_script import process_script, _fetch_paper_html
-from generate_podcast import generate_podcast_from_script, PodcastConfig
+from generate_podcast import generate_podcast_from_script, PodcastConfig, PodcastGenerator
 
 async def example_full_pipeline():
     """Example of complete pipeline: Paper -> Script -> Podcast"""
@@ -66,11 +66,11 @@ async def example_full_pipeline():
             normalize_audio=True
         )
         
-        # Generate podcast
-        podcast_path = generate_podcast_from_script(
+        # Generate podcast using async generator directly
+        generator = PodcastGenerator(config)
+        podcast_path = await generator.generate_podcast(
             script_text=script_text,
-            output_path=f"podcast_{paper_id}.wav",
-            **config.__dict__
+            output_path=f"podcast_{paper_id}.wav"
         )
         
         print(f"🎉 Podcast generated successfully!")
