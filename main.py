@@ -2,35 +2,84 @@
 MCP Server Template
 """
 
-from mcp.server.fastmcp import FastMCP
-from pydantic import Field
-
-import mcp.types as types
-
-
-
-from openai import OpenAI
-from typing import Literal, Any, List
-# from  backend.schemas.script import generate_model_with_context_check, reconstruct_script
-import instructor
-from instructor.core.hooks import Hooks, HookName
-import requests
+# Core imports needed for MCP server startup
 import os
 import logging
-import traceback
-from dotenv import load_dotenv
-from pydantic import BaseModel, Field, model_validator
+from typing import Literal, Any, List
+
+# Essential MCP imports
+from mcp.server.fastmcp import FastMCP
+from pydantic import Field, BaseModel, model_validator
 from enum import Enum
+
+# Environment setup
+from dotenv import load_dotenv
+load_dotenv()
+
+# Lazy imports - only import when needed
+def _lazy_import_openai():
+    try:
+        from openai import OpenAI
+        return OpenAI
+    except ImportError:
+        raise ImportError("OpenAI library not available")
+
+def _lazy_import_instructor():
+    try:
+        import instructor
+        # Try to import hooks for newer versions
+        try:
+            from instructor.core.hooks import Hooks, HookName
+            return instructor, True, Hooks, HookName
+        except ImportError:
+            # Fallback for older instructor versions
+            return instructor, False, None, None
+    except ImportError:
+        return None, False, None, None
+
+def _lazy_import_requests():
+    try:
+        import requests
+        return requests
+    except ImportError:
+        raise ImportError("Requests library not available")
+
+# Global variables for lazy loading
+_openai_client = None
+_instructor = None
+_hooks_available = None
+_hooks_class = None
+_hookname_class = None
+_requests = None
+
+# Get lazy imports when needed
+def get_openai():
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = _lazy_import_openai()
+    return _openai_client
+
+def get_instructor():
+    global _instructor, _hooks_available, _hooks_class, _hookname_class
+    if _instructor is None:
+        _instructor, _hooks_available, _hooks_class, _hookname_class = _lazy_import_instructor()
+    return _instructor, _hooks_available, _hooks_class, _hookname_class
+
+def get_requests():
+    global _requests
+    if _requests is None:
+        _requests = _lazy_import_requests()
+    return _requests
+
+# Standard library imports
+import re
 import asyncio
+import traceback
 
 
 logger = logging.getLogger(__name__)
 
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Access the variables
+# Access environment variables (already loaded above)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OCR_MODEL = os.getenv("OCR_MODEL")
 OCR_PROVIDER = os.getenv("OCR_PROVIDER")
@@ -477,77 +526,90 @@ Your output is a JSON with the following structure :
 
 
 
-def create_logging_hooks(tag: str = "instructor") -> Hooks:
-    """Create hooks that log each failed attempt (completion + parse errors)."""
-    hooks = Hooks()
-    state: dict[str, Any] = {"kwargs": None, "response": None}
-
-    def on_kwargs(*args: Any, **kwargs: Any) -> None:
-        try:
-            state["kwargs"] = {
-                "model": kwargs.get("model"),
-                "messages": kwargs.get("messages")
-                or kwargs.get("contents")
-                or kwargs.get("chat_history"),
-                "temperature": kwargs.get("temperature"),
-                "top_p": kwargs.get("top_p"),
-                "stream": kwargs.get("stream"),
-            }
-        except Exception:
-            pass
-
-    def on_response(response: Any) -> None:
-        state["response"] = response
-
-    def extract_text_from_response(resp: Any) -> str | None:
-        try:
-            if hasattr(resp, "choices") and resp.choices:
-                choice0 = resp.choices[0]
-                if hasattr(choice0, "message") and getattr(choice0.message, "content", None):
-                    return str(choice0.message.content)
-                if hasattr(choice0, "text") and getattr(choice0, "text", None):
-                    return str(choice0.text)
-        except Exception:
-            return None
+def create_logging_hooks(tag: str = "instructor"):
+    """Create hooks that log each failed attempt (completion + parse errors).
+    
+    Returns None for instructor 1.0.0 compatibility.
+    """
+    instructor, hooks_available, Hooks, HookName = get_instructor()
+    
+    if not hooks_available or not Hooks or not HookName:
+        logger.warning(f"Hooks not available in instructor version, skipping hook creation for {tag}")
         return None
+        
+    try:
+        hooks = Hooks()
+        state: dict[str, Any] = {"kwargs": None, "response": None}
 
-    def on_parse_error(error: Exception) -> None:
-        model = None
-        messages = None
-        if isinstance(state.get("kwargs"), dict):
-            model = state["kwargs"].get("model")
-            messages = state["kwargs"].get("messages")
-        raw_text = extract_text_from_response(state.get("response"))
-
-        logger.error(f"[{tag}] Parse error: {error}")
-        if model:
-            logger.error(f"[{tag}] Model: {model}")
-        if messages:
+        def on_kwargs(*args: Any, **kwargs: Any) -> None:
             try:
-                user_prompt = None
-                for m in messages:
-                    if isinstance(m, dict) and m.get("role") == "user":
-                        user_prompt = m.get("content")
-                if user_prompt:
-                    excerpt = str(user_prompt)
-                    logger.error(f"[{tag}] Prompt excerpt: {excerpt[:1000]}")
+                state["kwargs"] = {
+                    "model": kwargs.get("model"),
+                    "messages": kwargs.get("messages")
+                    or kwargs.get("contents")
+                    or kwargs.get("chat_history"),
+                    "temperature": kwargs.get("temperature"),
+                    "top_p": kwargs.get("top_p"),
+                    "stream": kwargs.get("stream"),
+                }
             except Exception:
                 pass
-        if raw_text:
-            logger.error(f"[{tag}] Raw completion excerpt: {raw_text[:1000]}")
 
-    def on_completion_error(error: Exception) -> None:
-        logger.error(f"[{tag}] Completion error: {error}")
+        def on_response(response: Any) -> None:
+            state["response"] = response
 
-    def on_last_attempt(error: Exception) -> None:
-        logger.error(f"[{tag}] Last attempt failed: {error}")
+        def extract_text_from_response(resp: Any) -> str | None:
+            try:
+                if hasattr(resp, "choices") and resp.choices:
+                    choice0 = resp.choices[0]
+                    if hasattr(choice0, "message") and getattr(choice0.message, "content", None):
+                        return str(choice0.message.content)
+                    if hasattr(choice0, "text") and getattr(choice0, "text", None):
+                        return str(choice0.text)
+            except Exception:
+                return None
+            return None
 
-    hooks.on(HookName.COMPLETION_KWARGS, on_kwargs)
-    hooks.on(HookName.COMPLETION_RESPONSE, on_response)
-    hooks.on(HookName.PARSE_ERROR, on_parse_error)
-    hooks.on(HookName.COMPLETION_ERROR, on_completion_error)
-    hooks.on(HookName.COMPLETION_LAST_ATTEMPT, on_last_attempt)
-    return hooks
+        def on_parse_error(error: Exception) -> None:
+            model = None
+            messages = None
+            if isinstance(state.get("kwargs"), dict):
+                model = state["kwargs"].get("model")
+                messages = state["kwargs"].get("messages")
+            raw_text = extract_text_from_response(state.get("response"))
+
+            logger.error(f"[{tag}] Parse error: {error}")
+            if model:
+                logger.error(f"[{tag}] Model: {model}")
+            if messages:
+                try:
+                    user_prompt = None
+                    for m in messages:
+                        if isinstance(m, dict) and m.get("role") == "user":
+                            user_prompt = m.get("content")
+                    if user_prompt:
+                        excerpt = str(user_prompt)
+                        logger.error(f"[{tag}] Prompt excerpt: {excerpt[:1000]}")
+                except Exception:
+                    pass
+            if raw_text:
+                logger.error(f"[{tag}] Raw completion excerpt: {raw_text[:1000]}")
+
+        def on_completion_error(error: Exception) -> None:
+            logger.error(f"[{tag}] Completion error: {error}")
+
+        def on_last_attempt(error: Exception) -> None:
+            logger.error(f"[{tag}] Last attempt failed: {error}")
+
+        hooks.on(HookName.COMPLETION_KWARGS, on_kwargs)
+        hooks.on(HookName.COMPLETION_RESPONSE, on_response)
+        hooks.on(HookName.PARSE_ERROR, on_parse_error)
+        hooks.on(HookName.COMPLETION_ERROR, on_completion_error)
+        hooks.on(HookName.COMPLETION_LAST_ATTEMPT, on_last_attempt)
+        return hooks
+    except Exception as e:
+        logger.warning(f"Failed to create hooks: {e}")
+        return None
 
 
 def _correct_result_link(script: str, url: str) -> str:
@@ -587,6 +649,7 @@ def _correct_result_link(script: str, url: str) -> str:
 
             try:
                 # Check if the URL leads to an image (PNG)
+                requests = get_requests()
                 response = requests.head(figure_url)
                 if response.status_code == 200 and "image/png" in response.headers.get(
                     "Content-Type", ""
@@ -601,7 +664,7 @@ def _correct_result_link(script: str, url: str) -> str:
                         and "image/png" in response.headers.get("Content-Type", "")
                     ):
                         split_script[line_idx] = r"Figure: " + figure_url
-            except requests.exceptions.RequestException:
+            except Exception:
                 # If the request fails, leave the link as is (or handle the error as you prefer)
                 pass
 
@@ -613,6 +676,10 @@ def _process_script_openrouter(paper: str, paper_id: str) -> str:
 
     Uses the OpenAI SDK pointed to the OpenRouter base URL.
     """
+    instructor, hooks_available, Hooks, HookName = get_instructor()
+    if not instructor:
+        raise ValueError("Instructor library is not available. Please install it.")
+        
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     OPENROUTER_MODEL = os.getenv("SCRIPGENETOR_MODEL", "qwen/qwen3-235b-a22b-thinking-2507")
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -621,43 +688,81 @@ def _process_script_openrouter(paper: str, paper_id: str) -> str:
         raise ValueError("You need to set the OPENROUTER_API_KEY environment variable.")
 
     try:
-        openrouter_client = instructor.from_openai(
-            OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL),
-            mode=instructor.Mode.OPENROUTER_STRUCTURED_OUTPUTS if "gpt" not in OPENROUTER_MODEL else instructor.Mode.JSON_SCHEMA,
-            hooks=create_logging_hooks("openrouter"),
-        )
+        # Create instructor client with compatibility handling
+        OpenAI = get_openai()
+        openai_client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
         
-        # Try with reduced validation first
-        response,raw = openrouter_client.chat.completions.create_with_completion(
-            model=OPENROUTER_MODEL,
-            messages=
-            [
-                {"role": "system", "content": SYSTEM_PROMPT_NO_LINK if paper_id == "paper_id" else SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Here is the paper I want you to generate a script from, its paper_id is {paper_id} : "
-                    + paper,
-                },
-            ],
-            response_model=generate_model_with_context_check(paper_id, paper),
-            temperature=0.1,  # Slightly higher temperature to avoid getting stuck
-            max_retries=2,    # Reduced retries to fail faster
-            max_tokens=8000,
-        )
+        # Try different modes for instructor compatibility
+        hooks = create_logging_hooks("openrouter")
+        
+        try:
+            # Try with modern instructor API first
+            if hasattr(instructor, 'Mode') and hasattr(instructor.Mode, 'JSON'):
+                mode = instructor.Mode.JSON
+            else:
+                # Fallback for older versions
+                mode = None
+                
+            if hooks is not None:
+                openrouter_client = instructor.from_openai(openai_client, mode=mode, hooks=hooks)
+            else:
+                openrouter_client = instructor.from_openai(openai_client, mode=mode)
+        except Exception as e:
+            logger.warning(f"Failed to create instructor client with advanced options: {e}")
+            # Fallback to basic instructor client
+            openrouter_client = instructor.from_openai(openai_client)
+        
+        # Try with different completion methods for compatibility
+        try:
+            # Try modern API first
+            if hasattr(openrouter_client.chat.completions, 'create_with_completion'):
+                response, raw = openrouter_client.chat.completions.create_with_completion(
+                    model=OPENROUTER_MODEL,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT_NO_LINK if paper_id == "paper_id" else SYSTEM_PROMPT},
+                        {
+                            "role": "user",
+                            "content": f"Here is the paper I want you to generate a script from, its paper_id is {paper_id} : " + paper,
+                        },
+                    ],
+                    response_model=generate_model_with_context_check(paper_id, paper),
+                    temperature=0.1,
+                    max_retries=2,
+                    max_tokens=8000,
+                )
+            else:
+                # Fallback to standard create method
+                response = openrouter_client.chat.completions.create(
+                    model=OPENROUTER_MODEL,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT_NO_LINK if paper_id == "paper_id" else SYSTEM_PROMPT},
+                        {
+                            "role": "user",
+                            "content": f"Here is the paper I want you to generate a script from, its paper_id is {paper_id} : " + paper,
+                        },
+                    ],
+                    response_model=generate_model_with_context_check(paper_id, paper),
+                    temperature=0.1,
+                    max_retries=2,
+                    max_tokens=8000,
+                )
+        except Exception as api_error:
+            logger.error(f"API call failed: {api_error}")
+            raise ValueError(f"Script generation API call failed: {api_error}")
         
         if not response:
             raise ValueError("Empty response received from model")
             
     except Exception as e:
-        print(f"Error during script generation: {e}")
+        logger.error(f"Error during script generation: {e}")
         # Try with a simpler prompt if the structured one fails
         raise ValueError(f"Script generation failed: {e}")
 
     try:
         result = reconstruct_script(response)
     except Exception as e:
-        print(e)
-        raise ValueError(f"The model failed the script generation:  {e}, {traceback.format_exc()}")
+        logger.error(f"Script reconstruction failed: {e}")
+        raise ValueError(f"The model failed the script generation: {e}, {traceback.format_exc()}")
     return result
 
 
@@ -701,10 +806,11 @@ def process_script(method: Literal["openrouter"], paper_markdown: str, paper_id 
 
 def _fetch_paper_html(url):
     try:
+        requests = get_requests()
         response = requests.get(url)
         response.raise_for_status()  # Raises an HTTPError for bad responses (4XX, 5XX)
         return response.text
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"Error fetching the URL: {e}")
         return None
 
@@ -716,24 +822,10 @@ def _fetch_paper_html(url):
 
 
 
-logger = logging.getLogger(__name__)
 
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Access the variables
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OCR_MODEL = os.getenv("OCR_MODEL")
-OCR_PROVIDER = os.getenv("OCR_PROVIDER")
-OCR_COORDINATE_EXTRACTOR_MODEL = os.getenv("OCR_COORDINATE_EXTRACTOR_MODEL")
-OCR_PARSING_MODEL = os.getenv("OCR_PARSING_MODEL")
-OCR_FIGURE_DETECTOR_MODEL = os.getenv("OCR_FIGURE_DETECTOR_MODEL")
-SCRIPGENETOR_MODEL = os.getenv("SCRIPGENETOR_MODEL")
-GEMINI_SCRIP_MODEL = os.getenv("GEMINI_SCRIP_MODEL")
-
-
-mcp = FastMCP("Podcast Generator", port=3000, stateless_http=True, debug=True)
+# Initialize MCP server early to reduce startup time
+mcp = FastMCP("Podcast Generator", port=3000, stateless_http=True, debug=False)
 
 
 
