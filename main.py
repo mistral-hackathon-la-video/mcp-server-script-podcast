@@ -736,12 +736,6 @@ GEMINI_SCRIP_MODEL = os.getenv("GEMINI_SCRIP_MODEL")
 mcp = FastMCP("Podcast Generator", port=3000, stateless_http=True, debug=True)
 
 
-@mcp.tool(
-    title="Echo Tool",
-    description="Echo the input text",
-)
-def echo(text: str = Field(description="The text to echo")) -> str:
-    return text
 
 @mcp.tool(
     title="Generate podcast script",
