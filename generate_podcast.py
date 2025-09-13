@@ -68,11 +68,11 @@ class AudioSegment:
 class PodcastConfig:
     """Configuration for podcast generation."""
     # TTS Engine selection
-    tts_engine: Literal["kokoro", "elevenlabs", "mixed"] = "mixed"
+    tts_engine: Literal["kokoro", "elevenlabs", "mixed", "mock"] = "mixed"
     
     # Voice settings
-    headline_voice: str = "narrator"  # For headlines 
-    text_voice: str = "host"         # For main text
+    headline_voice: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel - for headlines 
+    text_voice: str = "2EiwWnXFnvU5JabPnv8n"    # Clyde - for main text
     
     # Audio settings
     sample_rate: int = 24000
@@ -238,11 +238,11 @@ class PodcastGenerator:
                 voice_settings = None
             
             # Generate audio
-            audio_generator = self.elevenlabs.generate(
+            audio_generator = self.elevenlabs.text_to_speech.convert(
                 text=clean_text,
-                voice=voice,
+                voice_id=voice,
                 voice_settings=voice_settings,
-                model="eleven_multilingual_v2"
+                model_id="eleven_multilingual_v2"
             )
             
             # Collect audio bytes
@@ -322,7 +322,11 @@ class PodcastGenerator:
             else:
                 engine = self.config.tts_engine
                 
-            if engine == "elevenlabs" and self.elevenlabs:
+            if engine == "mock":
+                # Force mock audio generation
+                audio_data, sample_rate = self._generate_mock_audio(text)
+                voice_used = "Mock-TTS"
+            elif engine == "elevenlabs" and self.elevenlabs:
                 audio_data, sample_rate = await self.generate_audio_elevenlabs(text, voice)
                 voice_used = f"ElevenLabs-{voice}"
             elif engine == "kokoro" and self.kokoro_pipeline:
@@ -346,10 +350,13 @@ class PodcastGenerator:
             raise
         
         # Resample if necessary
-        if sample_rate != self.config.sample_rate:
+        config_sample_rate = getattr(self.config, 'sample_rate', 24000)
+        if hasattr(config_sample_rate, 'default'):
+            config_sample_rate = config_sample_rate.default
+        if sample_rate != config_sample_rate:
             # Simple resampling (you might want to use librosa for better quality)
-            audio_data = self._resample_audio(audio_data, sample_rate, self.config.sample_rate)
-            sample_rate = self.config.sample_rate
+            audio_data = self._resample_audio(audio_data, sample_rate, config_sample_rate)
+            sample_rate = config_sample_rate
         
         duration = len(audio_data) / sample_rate
         
@@ -375,7 +382,10 @@ class PodcastGenerator:
 
     def create_silence(self, duration: float) -> np.ndarray:
         """Create silence of specified duration."""
-        return np.zeros(int(duration * self.config.sample_rate))
+        sample_rate = getattr(self.config, 'sample_rate', 24000)
+        if hasattr(sample_rate, 'default'):
+            sample_rate = sample_rate.default
+        return np.zeros(int(duration * sample_rate))
 
     def _generate_mock_audio(self, text: str) -> Tuple[np.ndarray, int]:
         """Generate mock audio for testing when no TTS engines are available."""
@@ -384,7 +394,9 @@ class PodcastGenerator:
         duration = max(1.0, words * 0.4)  # ~2.5 words per second
         
         # Generate a simple sine wave tone
-        sample_rate = self.config.sample_rate
+        sample_rate = getattr(self.config, 'sample_rate', 24000)
+        if hasattr(sample_rate, 'default'):
+            sample_rate = sample_rate.default
         samples = int(duration * sample_rate)
         t = np.linspace(0, duration, samples, False)
         
@@ -448,20 +460,29 @@ class PodcastGenerator:
         combined_audio = self._combine_audio_segments(audio_segments)
         
         # Normalize audio if requested
-        if self.config.normalize_audio:
+        normalize_audio = getattr(self.config, 'normalize_audio', True)
+        if hasattr(normalize_audio, 'default'):
+            normalize_audio = normalize_audio.default
+        if normalize_audio:
             combined_audio = self._normalize_audio(combined_audio)
         
         # Generate output filename if not provided
         if not output_path:
-            output_path = f"podcast_{len(components)}_segments.{self.config.output_format}"
+            output_format = getattr(self.config, 'output_format', 'wav')
+            if hasattr(output_format, 'default'):
+                output_format = output_format.default
+            output_path = f"podcast_{len(components)}_segments.{output_format}"
         
         # Save final podcast
-        sf.write(output_path, combined_audio, self.config.sample_rate)
+        config_sample_rate = getattr(self.config, 'sample_rate', 24000)
+        if hasattr(config_sample_rate, 'default'):
+            config_sample_rate = config_sample_rate.default
+        sf.write(output_path, combined_audio, config_sample_rate)
         
         # Cleanup temp files
         self._cleanup_temp_files()
         
-        final_duration = len(combined_audio) / self.config.sample_rate
+        final_duration = len(combined_audio) / config_sample_rate
         logger.info(f"🎉 Podcast generated successfully!")
         logger.info(f"📊 Final duration: {final_duration:.2f}s ({final_duration/60:.1f} minutes)")
         logger.info(f"💾 Saved to: {output_path}")
@@ -479,9 +500,13 @@ class PodcastGenerator:
             # Add silence after segment (except last one)
             if i < len(segments) - 1:
                 if segment.component_type == "Headline":
-                    silence_duration = self.config.headline_silence
+                    silence_duration = getattr(self.config, 'headline_silence', 1.0)
+                    if hasattr(silence_duration, 'default'):
+                        silence_duration = silence_duration.default
                 else:
-                    silence_duration = self.config.silence_duration
+                    silence_duration = getattr(self.config, 'silence_duration', 0.5)
+                    if hasattr(silence_duration, 'default'):
+                        silence_duration = silence_duration.default
                 
                 silence = self.create_silence(silence_duration)
                 combined.append(silence)

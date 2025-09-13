@@ -21,6 +21,7 @@ import traceback
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, model_validator
 from enum import Enum
+import asyncio
 
 
 logger = logging.getLogger(__name__)
@@ -773,12 +774,17 @@ async def generate_script(
         # Import the process_script function from generate_script.py
         from generate_script import process_script
         
+        # Extract actual values from Field objects if needed
+        actual_method = getattr(method, 'default', method) if hasattr(method, 'default') else method
+        actual_paper_id = getattr(paper_id, 'default', paper_id) if hasattr(paper_id, 'default') else paper_id
+        actual_from_pdf = getattr(from_pdf, 'default', from_pdf) if hasattr(from_pdf, 'default') else from_pdf
+        
         # Generate the script using the imported function
         result = process_script(
-            method=method,
+            method=actual_method,
             paper_markdown=paper_markdown,
-            paper_id=paper_id,
-            from_pdf=from_pdf
+            paper_id=actual_paper_id,
+            from_pdf=actual_from_pdf
         )
         
         return result
@@ -786,6 +792,180 @@ async def generate_script(
     except Exception as e:
         logger.error(f"Error generating script: {e}")
         raise ValueError(f"Script generation failed: {str(e)}")
+
+
+@mcp.tool(
+    title="Generate Podcast",
+    description="Generates an audio podcast from a text script using ElevenLabs TTS",
+)
+async def generate_podcast(
+    script_text: str = Field(description="The script text content to convert to audio"),
+    output_filename: str = Field(default="podcast.wav", description="Output filename for the generated podcast"),
+    tts_engine: str = Field(default="elevenlabs", description="TTS engine to use: 'elevenlabs', 'kokoro', 'mixed', or 'mock'"),
+    headline_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="ElevenLabs voice ID for headlines (default: Rachel)"),
+    text_voice_id: str = Field(default="2EiwWnXFnvU5JabPnv8n", description="ElevenLabs voice ID for main text (default: Clyde)"),
+    sample_rate: int = Field(default=24000, description="Audio sample rate"),
+    silence_duration: float = Field(default=0.5, description="Silence duration between segments in seconds"),
+    headline_silence: float = Field(default=1.0, description="Extra silence after headlines in seconds")
+) -> str:
+    """Generates an audio podcast from a text script.
+    
+    This tool takes a formatted script text (with \\Headline: and \\Text: components)
+    and converts it to an audio podcast using ElevenLabs text-to-speech.
+    
+    Args:
+        script_text: The formatted script text content
+        output_filename: Output filename for the generated podcast
+        tts_engine: TTS engine to use ('elevenlabs', 'kokoro', 'mixed', or 'mock')
+        headline_voice_id: ElevenLabs voice ID for headlines
+        text_voice_id: ElevenLabs voice ID for main text
+        sample_rate: Audio sample rate
+        silence_duration: Silence between segments in seconds
+        headline_silence: Extra silence after headlines in seconds
+        
+    Returns:
+        Status message with podcast file path and duration
+        
+    Raises:
+        ValueError: If podcast generation fails
+    """
+    try:
+        # Import the podcast generation classes
+        from generate_podcast import PodcastGenerator, PodcastConfig
+        
+        # Extract actual values from Field objects if needed
+        actual_tts_engine = getattr(tts_engine, 'default', tts_engine) if hasattr(tts_engine, 'default') else tts_engine
+        actual_headline_voice = getattr(headline_voice_id, 'default', headline_voice_id) if hasattr(headline_voice_id, 'default') else headline_voice_id
+        actual_text_voice = getattr(text_voice_id, 'default', text_voice_id) if hasattr(text_voice_id, 'default') else text_voice_id
+        actual_sample_rate = getattr(sample_rate, 'default', sample_rate) if hasattr(sample_rate, 'default') else sample_rate
+        actual_silence_duration = getattr(silence_duration, 'default', silence_duration) if hasattr(silence_duration, 'default') else silence_duration
+        actual_headline_silence = getattr(headline_silence, 'default', headline_silence) if hasattr(headline_silence, 'default') else headline_silence
+        actual_output_filename = getattr(output_filename, 'default', output_filename) if hasattr(output_filename, 'default') else output_filename
+        
+        # Create configuration
+        config = PodcastConfig(
+            tts_engine=actual_tts_engine,
+            headline_voice=actual_headline_voice,
+            text_voice=actual_text_voice,
+            sample_rate=actual_sample_rate,
+            silence_duration=actual_silence_duration,
+            headline_silence=actual_headline_silence,
+            output_format="wav"
+        )
+        
+        # Create generator
+        generator = PodcastGenerator(config=config)
+        
+        # Generate podcast
+        output_path = await generator.generate_podcast(
+            script_text=script_text,
+            output_path=actual_output_filename
+        )
+        
+        # Get file info
+        import os
+        import soundfile as sf
+        
+        if os.path.exists(output_path):
+            # Get duration
+            audio_data, sr = sf.read(output_path)
+            duration_seconds = len(audio_data) / sr
+            duration_minutes = duration_seconds / 60
+            
+            # Get file size
+            file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+            
+            # Get actual sample rate value
+            display_sample_rate = getattr(config, 'sample_rate', 24000)
+            if hasattr(display_sample_rate, 'default'):
+                display_sample_rate = display_sample_rate.default
+                
+            return f"✅ Podcast generated successfully!\n" \
+                   f"📄 File: {output_path}\n" \
+                   f"⏱️ Duration: {duration_minutes:.1f} minutes ({duration_seconds:.1f}s)\n" \
+                   f"💾 Size: {file_size_mb:.1f} MB\n" \
+                   f"🎵 Engine: {actual_tts_engine}\n" \
+                   f"🔊 Sample Rate: {display_sample_rate} Hz"
+        else:
+            raise ValueError(f"Podcast file was not created at {output_path}")
+        
+    except Exception as e:
+        logger.error(f"Error generating podcast: {e}")
+        raise ValueError(f"Podcast generation failed: {str(e)}")
+
+
+@mcp.tool(
+    title="Generate Script and Podcast Pipeline",
+    description="Full pipeline: generates video script from paper and converts it to audio podcast",
+)
+async def generate_script_and_podcast(
+    paper_markdown: str = Field(description="The research paper content in markdown format"),
+    paper_id: str = Field(description="The ArXiv paper ID (e.g., '2405.11273')"),
+    output_filename: str = Field(default="podcast.wav", description="Output filename for the generated podcast"),
+    method: str = Field(default="openrouter", description="The method to use for script generation"),
+    from_pdf: bool = Field(default=False, description="Whether the paper comes from PDF extraction"),
+    tts_engine: str = Field(default="elevenlabs", description="TTS engine to use: 'elevenlabs', 'kokoro', 'mixed', or 'mock'"),
+    headline_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="ElevenLabs voice ID for headlines (default: Rachel)"),
+    text_voice_id: str = Field(default="2EiwWnXFnvU5JabPnv8n", description="ElevenLabs voice ID for main text (default: Clyde)")
+) -> str:
+    """Complete pipeline: generates script from paper and converts to podcast.
+    
+    This tool combines script generation and podcast creation in one step.
+    It first generates a video script from the research paper, then converts
+    that script into an audio podcast.
+    
+    Args:
+        paper_markdown: The research paper content in markdown format
+        paper_id: The ArXiv paper ID (e.g., '2405.11273')
+        output_filename: Output filename for the generated podcast
+        method: The AI method to use for script generation
+        from_pdf: Whether the paper comes from PDF extraction
+        tts_engine: TTS engine to use for audio generation
+        headline_voice_id: ElevenLabs voice ID for headlines
+        text_voice_id: ElevenLabs voice ID for main text
+        
+    Returns:
+        Status message with both script and podcast information
+        
+    Raises:
+        ValueError: If script or podcast generation fails
+    """
+    try:
+        # Extract actual values from Field objects if needed
+        actual_method = getattr(method, 'default', method) if hasattr(method, 'default') else method
+        actual_paper_id = getattr(paper_id, 'default', paper_id) if hasattr(paper_id, 'default') else paper_id
+        actual_from_pdf = getattr(from_pdf, 'default', from_pdf) if hasattr(from_pdf, 'default') else from_pdf
+        actual_output_filename = getattr(output_filename, 'default', output_filename) if hasattr(output_filename, 'default') else output_filename
+        actual_tts_engine = getattr(tts_engine, 'default', tts_engine) if hasattr(tts_engine, 'default') else tts_engine
+        actual_headline_voice_id = getattr(headline_voice_id, 'default', headline_voice_id) if hasattr(headline_voice_id, 'default') else headline_voice_id
+        actual_text_voice_id = getattr(text_voice_id, 'default', text_voice_id) if hasattr(text_voice_id, 'default') else text_voice_id
+        
+        # Step 1: Generate script
+        logger.info("🔄 Step 1: Generating script...")
+        script_text = await generate_script(
+            paper_markdown=paper_markdown,
+            paper_id=actual_paper_id,
+            method=actual_method,
+            from_pdf=actual_from_pdf
+        )
+        
+        # Step 2: Generate podcast
+        logger.info("🔄 Step 2: Generating podcast...")
+        podcast_result = await generate_podcast(
+            script_text=script_text,
+            output_filename=actual_output_filename,
+            tts_engine=actual_tts_engine,
+            headline_voice_id=actual_headline_voice_id,
+            text_voice_id=actual_text_voice_id
+        )
+        
+        return f"✅ Complete pipeline successful!\n\n" \
+               f"📝 Script generated for paper {actual_paper_id}\n" \
+               f"🎙️ {podcast_result}"
+        
+    except Exception as e:
+        logger.error(f"Error in script and podcast pipeline: {e}")
+        raise ValueError(f"Pipeline failed: {str(e)}")
 
 
 @mcp.resource(

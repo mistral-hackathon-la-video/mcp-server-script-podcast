@@ -675,16 +675,16 @@ def process_script(method: Literal["openrouter"], paper_markdown: str, paper_id 
         paper_id = "paper_id"
     if method == "openai":
         return _process_script_gpt(pd_corrected_links,paper_id)
-    if method == "local":
+    elif method == "local":
         return _process_script_open_source(pd_corrected_links, paper_id, end_point_base_url)
-    if method == "gemini":
+    elif method == "gemini":
         return _process_script_open_gemini(pd_corrected_links, paper_id, end_point_base_url)
-    if method == "groq":
+    elif method == "groq":
         return _process_script_groq(pd_corrected_links,paper_id)
-    if method == "openrouter":
+    elif method == "openrouter":
         return _process_script_openrouter(pd_corrected_links, paper_id)
     else:
-        raise ValueError("Invalid method. Please choose 'openai'.")
+        raise ValueError(f"Invalid method '{method}'. Please choose 'openrouter', 'openai', 'gemini', 'groq', or 'local'.")
 
 
 def _fetch_paper_html(url):
